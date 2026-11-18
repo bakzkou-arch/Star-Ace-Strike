@@ -1,9 +1,10 @@
-const version = "26.2.37.01";
+const version = "26.2.38.00";
 const prefix = "sky-strike-offline-";
 const cacheName = prefix + version;
-const gameFiles = ["./","./offline-install.js","./app.webmanifest","./skystrike-icon-192.png","./skystrike-icon-512.png","./assets/aerial_grass_rock-Diffuse.jpg","./assets/aerial_grass_rock-nor_gl.jpg","./assets/aerial_grass_rock-Rough.jpg","./assets/aerial_ground_rock-Diffuse.jpg","./assets/aerial_ground_rock-nor_gl.jpg","./assets/aerial_ground_rock-Rough.jpg","./assets/blue_metal_plate-nor_gl.jpg","./assets/blue_metal_plate-Rough.jpg"];
+const gameFiles = ["./","./offline-install.js","./app.webmanifest","./skystrike-icon-192.png","./skystrike-icon-512.png","./assets/compact/title.webp","./assets/compact/loading.webp","./assets/free-audio/briefing.mp3","./assets/free-audio/hangar.mp3","./assets/free-audio/combat.mp3","./assets/free-audio/combat-2.mp3","./assets/free-audio/boss.mp3","./assets/free-audio/launch.mp3","./assets/free-audio/special-launch.mp3","./assets/free-audio/weapon-switch.mp3","./assets/free-audio/gun.mp3","./assets/free-audio/explosion.mp3","./assets/free-audio/interface.mp3","./assets/free-audio/booster.mp3","./assets/compact/aerial_grass_rock-Diffuse.jpg","./assets/compact/aerial_grass_rock-nor_gl.jpg","./assets/compact/aerial_grass_rock-Rough.jpg","./assets/compact/aerial_ground_rock-Diffuse.jpg","./assets/compact/aerial_ground_rock-nor_gl.jpg","./assets/compact/aerial_ground_rock-Rough.jpg","./assets/compact/blue_metal_plate-nor_gl.jpg","./assets/compact/blue_metal_plate-Rough.jpg"];
 const scope = new URL(self.registration.scope);
 const urlFor = path => new URL(path, scope).href;
+const indexPath = new URL("index.html", scope).pathname;
 const cachedURLs = new Set(gameFiles.map(urlFor));
 let saving;
 
@@ -30,9 +31,11 @@ self.addEventListener("message", event => {
     () => port.postMessage({ ok: false })));
 });
 
-async function findSaved(url) {
-  const current = await caches.match(url, { cacheName });
-  if (current) return current;
+async function findSaved(url, previousOnly = false) {
+  if (!previousOnly) {
+    const current = await caches.match(url, { cacheName });
+    if (current) return current;
+  }
   for (const name of (await caches.keys()).reverse()) {
     if (!name.startsWith(prefix) || name === cacheName) continue;
     const previous = await caches.match(url, { cacheName: name });
@@ -61,12 +64,13 @@ self.addEventListener("fetch", event => {
   const { request } = event;
   const url = new URL(request.url);
   if (request.method !== "GET" || url.origin !== scope.origin) return;
-  if (request.mode === "navigate" && url.pathname === scope.pathname) {
+  if (request.mode === "navigate" && (url.pathname === scope.pathname || url.pathname === indexPath)) {
     event.respondWith(fetch(request).catch(async () => (await findSaved(scope.href)) ?? Response.error()));
-  } else if (cachedURLs.has(url.href)) {
+  } else if (cachedURLs.has(url.href) || url.pathname.startsWith(scope.pathname + "assets/")) {
     event.respondWith((async () => {
-      const saved = await findSaved(url.href);
-      if (!saved) return fetch(request);
+      const saved = await caches.match(url.href, { cacheName }) ?? await fetch(request).catch(() => findSaved(url.href, true));
+      if (!saved) return Response.error();
+      if (saved.status !== 200) return saved;
       return request.headers.has("Range") ? savedRange(request, saved) : saved;
     })());
   }
