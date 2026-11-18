@@ -1,7 +1,7 @@
-const version = "26.2.38.00";
+const version = "26.2.39.00";
 const prefix = "sky-strike-offline-";
 const cacheName = prefix + version;
-const gameFiles = ["./","./offline-install.js","./app.webmanifest","./skystrike-icon-192.png","./skystrike-icon-512.png","./assets/compact/title.webp","./assets/compact/loading.webp","./assets/free-audio/briefing.mp3","./assets/free-audio/hangar.mp3","./assets/free-audio/combat.mp3","./assets/free-audio/combat-2.mp3","./assets/free-audio/boss.mp3","./assets/free-audio/launch.mp3","./assets/free-audio/special-launch.mp3","./assets/free-audio/weapon-switch.mp3","./assets/free-audio/gun.mp3","./assets/free-audio/explosion.mp3","./assets/free-audio/interface.mp3","./assets/free-audio/booster.mp3","./assets/compact/aerial_grass_rock-Diffuse.jpg","./assets/compact/aerial_grass_rock-nor_gl.jpg","./assets/compact/aerial_grass_rock-Rough.jpg","./assets/compact/aerial_ground_rock-Diffuse.jpg","./assets/compact/aerial_ground_rock-nor_gl.jpg","./assets/compact/aerial_ground_rock-Rough.jpg","./assets/compact/blue_metal_plate-nor_gl.jpg","./assets/compact/blue_metal_plate-Rough.jpg"];
+const gameFiles = ["./","./offline-install.js","./app.webmanifest","./skystrike-icon-192.png","./skystrike-icon-512.png","./assets/runtime/game-149fc2d1d6e9.js","./assets/compact/title.webp","./assets/compact/loading.webp","./assets/free-audio/briefing.mp3","./assets/free-audio/hangar.mp3","./assets/free-audio/combat.mp3","./assets/free-audio/combat-2.mp3","./assets/free-audio/boss.mp3","./assets/free-audio/launch.mp3","./assets/free-audio/special-launch.mp3","./assets/free-audio/weapon-switch.mp3","./assets/free-audio/gun.mp3","./assets/free-audio/explosion.mp3","./assets/free-audio/interface.mp3","./assets/free-audio/booster.mp3","./assets/compact/aerial_grass_rock-Diffuse.webp","./assets/compact/aerial_grass_rock-nor_gl.jpg","./assets/compact/aerial_grass_rock-Rough.webp","./assets/compact/aerial_ground_rock-Diffuse.webp","./assets/compact/aerial_ground_rock-nor_gl.jpg","./assets/compact/aerial_ground_rock-Rough.webp","./assets/compact/blue_metal_plate-nor_gl.jpg","./assets/compact/blue_metal_plate-Rough.webp"];
 const scope = new URL(self.registration.scope);
 const urlFor = path => new URL(path, scope).href;
 const indexPath = new URL("index.html", scope).pathname;
@@ -31,11 +31,9 @@ self.addEventListener("message", event => {
     () => port.postMessage({ ok: false })));
 });
 
-async function findSaved(url, previousOnly = false) {
-  if (!previousOnly) {
-    const current = await caches.match(url, { cacheName });
-    if (current) return current;
-  }
+async function findSaved(url) {
+  const current = await caches.match(url, { cacheName });
+  if (current) return current;
   for (const name of (await caches.keys()).reverse()) {
     if (!name.startsWith(prefix) || name === cacheName) continue;
     const previous = await caches.match(url, { cacheName: name });
@@ -44,8 +42,8 @@ async function findSaved(url, previousOnly = false) {
 }
 
 async function savedRange(request, response) {
-  const bytes = await response.arrayBuffer();
-  const length = bytes.byteLength;
+  const bytes = await response.blob();
+  const length = bytes.size;
   const match = /^bytes=(\d*)-(\d*)$/i.exec(request.headers.get("Range"));
   const start = match?.[1] ? Number(match[1]) : Math.max(0, length - Number(match?.[2]));
   const end = match?.[1] && match[2] ? Math.min(length - 1, Number(match[2])) : length - 1;
@@ -60,6 +58,24 @@ async function savedRange(request, response) {
   return new Response(bytes.slice(start, end + 1), { status: 206, headers });
 }
 
+async function loadAsset(request) {
+  const source = new URL(request.url);
+  // Open pages from the previous release can still request the old JPEG paths.
+  if (/\/(?:aerial_(?:grass|ground)_rock-(?:Diffuse|Rough)|blue_metal_plate-Rough)\.jpg$/.test(source.pathname)
+      && source.pathname.startsWith(scope.pathname + "assets/compact/")) {
+    source.pathname = source.pathname.replace(/\.jpg$/, ".webp");
+  }
+  const current = await caches.match(source.href, { cacheName });
+  if (current) return current;
+  try {
+    const response = await fetch(source.href === request.url ? request : source.href);
+    if (response.ok) return response;
+    return (await findSaved(request.url)) ?? response;
+  } catch {
+    return (await findSaved(source.href)) ?? (await findSaved(request.url)) ?? Response.error();
+  }
+}
+
 self.addEventListener("fetch", event => {
   const { request } = event;
   const url = new URL(request.url);
@@ -68,8 +84,7 @@ self.addEventListener("fetch", event => {
     event.respondWith(fetch(request).catch(async () => (await findSaved(scope.href)) ?? Response.error()));
   } else if (cachedURLs.has(url.href) || url.pathname.startsWith(scope.pathname + "assets/")) {
     event.respondWith((async () => {
-      const saved = await caches.match(url.href, { cacheName }) ?? await fetch(request).catch(() => findSaved(url.href, true));
-      if (!saved) return Response.error();
+      const saved = await loadAsset(request);
       if (saved.status !== 200) return saved;
       return request.headers.has("Range") ? savedRange(request, saved) : saved;
     })());
