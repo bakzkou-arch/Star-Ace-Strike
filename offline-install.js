@@ -56,6 +56,7 @@
       const response = await saveWith(await waitForWorker(await register()));
       if (response.ok) ready();
       else if (response.update) say("ページを再読み込みして、もう一度保存してください。", "Reload the page and save again.");
+      else if (response.reason==="quota") say("空き容量が足りません。容量を確保して再試行してください。", "Storage is full. Free some space and try again.");
       else throw new Error("Could not save the game");
     } catch {
       say("保存できませんでした。接続と空き容量を確認し、もう一度お試しください。", "Save failed. Check your connection and available storage, then try again.");
